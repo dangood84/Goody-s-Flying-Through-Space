@@ -1,0 +1,29 @@
+# Build output
+out/
+bin/
+build/
+target/
+*.class
+*.jar
+*.war
+hs_err_pid*
+replay_pid*
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+
+# Editors / IDEs
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.vscode/
+.cursor/
+*.swp
+*~
+
+# Logs
+*.log
