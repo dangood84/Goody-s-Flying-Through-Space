@@ -1,7 +1,8 @@
 package com.goody.screensaver;
 
 /**
- * Compatibility entry point; prefer {@link StarfieldSaver}.
+ * Compatibility {@code main} so project-style run commands still work. All
+ * behaviour lives in {@link StarfieldSaver}; this class only forwards argv.
  */
 public final class FlyingThroughSpace {
 

@@ -24,15 +24,21 @@ import javax.swing.JPanel;
 import javax.swing.JSlider;
 
 /**
- * Configuration dialog for star density, warp speed, size, trails, and colors.
- * Changes are written to {@link java.util.prefs.Preferences} as they happen.
+ * Settings view bound to one {@link ScreensaverConfig}. Controls write the model
+ * immediately; the preview {@link StarfieldPanel} rereads that model every tick
+ * and paint, so there is no separate “Apply” step for the live starfield.
  */
 public final class SettingsDialog extends JDialog {
 
     private final ScreensaverConfig config;
+    /**
+     * dispose() always fires windowClosed. When we leave for full screen we must
+     * not System.exit, or the saver never appears.
+     */
     private boolean launchingScreensaver;
 
     public SettingsDialog(ScreensaverConfig config) {
+        // null owner: this is the primary window, not a child of another Frame.
         super((Frame) null, "Goody's Flying Through Space", false);
         this.config = config;
 
@@ -78,6 +84,8 @@ public final class SettingsDialog extends JDialog {
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.weightx = 1;
 
+        // ChangeListener fires while the thumb is dragged, not only on release, so
+        // the preview rebuilds density / warp as the tester slides — that is intentional.
         addRow(form, constraints, 0, "Number of stars", sliderRow(
                 20,
                 800,
@@ -118,6 +126,8 @@ public final class SettingsDialog extends JDialog {
     private JPanel buildPreviewAndActions() {
         var south = new JPanel(new BorderLayout(0, 10));
 
+        // Same class as full screen, same config instance: slider changes are visible
+        // on the next timer paint without wiring a custom listener into StarfieldPanel.
         var preview = new StarfieldPanel(config);
         preview.setPreferredSize(new Dimension(600, 200));
         preview.setBorder(BorderFactory.createLineBorder(new Color(40, 40, 40)));
@@ -147,6 +157,7 @@ public final class SettingsDialog extends JDialog {
         new StarfieldFrame(config.copy(), () -> System.exit(0)).showFullScreen();
     }
 
+    /** Mutate the in-memory model, then flush Preferences so a crash still keeps the last edit. */
     private void persist(Runnable update) {
         update.run();
         config.save();

@@ -7,8 +7,10 @@ import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
 /**
- * Mutable settings for the starfield. Values are persisted with
- * {@link Preferences} so they reload automatically on the next launch.
+ * Mutable appearance/speed model. This is not window state (each star's
+ * {@code x,y,z} lives on {@link StarfieldPanel}). {@link Preferences} writes
+ * to the OS user store (Windows registry / macOS defaults / Linux file under
+ * the home directory), not a file in the project, so values survive relaunch.
  */
 public final class ScreensaverConfig {
 
@@ -36,14 +38,21 @@ public final class ScreensaverConfig {
     private Color starColor = new Color(DEFAULT_STAR_COLOR, true);
     private Color backgroundColor = new Color(DEFAULT_BACKGROUND_COLOR, true);
 
+    /**
+     * Overlay stored keys onto a fresh instance. Missing keys keep the field
+     * initializers (defaults), which is why a first-ever launch still looks designed.
+     */
     public static ScreensaverConfig load() {
         var config = new ScreensaverConfig();
         config.starCount = PREFS.getInt(KEY_STAR_COUNT, config.starCount);
         config.warpSpeed = PREFS.getInt(KEY_WARP_SPEED, config.warpSpeed);
         config.maxStarSize = PREFS.getInt(KEY_MAX_STAR_SIZE, config.maxStarSize);
         config.warpTrails = PREFS.getBoolean(KEY_WARP_TRAILS, config.warpTrails);
+        // Packed ARGB int is what Preferences can store; the true alpha constructor
+        // preserves the high bits if we ever persist translucent colours.
         config.starColor = new Color(PREFS.getInt(KEY_STAR_COLOR, config.starColor.getRGB()), true);
         config.backgroundColor = new Color(PREFS.getInt(KEY_BACKGROUND_COLOR, config.backgroundColor.getRGB()), true);
+        // Re-run setters so a hand-edited prefs store cannot inject out-of-range values.
         config.setStarCount(config.starCount);
         config.setWarpSpeed(config.warpSpeed);
         config.setMaxStarSize(config.maxStarSize);
@@ -58,12 +67,14 @@ public final class ScreensaverConfig {
         PREFS.putInt(KEY_STAR_COLOR, starColor.getRGB());
         PREFS.putInt(KEY_BACKGROUND_COLOR, backgroundColor.getRGB());
         try {
+            // flush() forces the OS store now; without it, a kill -9 could drop the last edit.
             PREFS.flush();
         } catch (BackingStoreException ex) {
             LOG.log(Level.WARNING, "Unable to persist screensaver preferences", ex);
         }
     }
 
+    /** Snapshot so full-screen is not sharing a live object the dialog might still mutate. */
     public ScreensaverConfig copy() {
         var copy = new ScreensaverConfig();
         copy.starCount = starCount;

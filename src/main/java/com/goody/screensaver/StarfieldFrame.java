@@ -13,8 +13,8 @@ import java.awt.image.BufferedImage;
 import javax.swing.JFrame;
 
 /**
- * Undecorated full-screen window that hosts the starfield.
- * Any keypress or significant mouse movement exits the process.
+ * Full-screen window shell. Owns exclusive display mode and wake-on-input;
+ * the starfield itself is delegated to {@link StarfieldPanel}.
  */
 public final class StarfieldFrame extends JFrame {
 
@@ -22,6 +22,7 @@ public final class StarfieldFrame extends JFrame {
 
     private final GraphicsDevice device;
     private final Runnable onExit;
+    /** Guard so key + motion cannot run teardown twice (second pass would NPE or re-exit). */
     private boolean exited;
     private Point firstMousePoint;
 
@@ -30,9 +31,11 @@ public final class StarfieldFrame extends JFrame {
         this.onExit = onExit;
         this.device = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
 
+        // Undecorated + exclusive full screen hides the title bar and typically the menu bar/dock.
         setUndecorated(true);
         setResizable(false);
         setAlwaysOnTop(true);
+        // We handle dismiss ourselves; the OS close button is gone anyway.
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setCursor(invisibleCursor());
         setFocusable(true);
@@ -44,6 +47,8 @@ public final class StarfieldFrame extends JFrame {
 
     public void showFullScreen() {
         if (device.isFullScreenSupported()) {
+            // Exclusive mode: the device shows only this window. Must later pass null
+            // to restore the desktop, or the user can be stuck without a menu bar.
             device.setFullScreenWindow(this);
         } else {
             setExtendedState(MAXIMIZED_BOTH);
@@ -66,6 +71,7 @@ public final class StarfieldFrame extends JFrame {
                 exitScreensaver();
             }
         };
+        // Listen on both frame and panel: depending on OS/focus, key events may hit either.
         addKeyListener(keys);
         panel.addKeyListener(keys);
 
@@ -86,6 +92,8 @@ public final class StarfieldFrame extends JFrame {
 
     private void onMouseMoved(Point point) {
         if (firstMousePoint == null) {
+            // Entering full screen often synthesizes a motion event. Ignore the first sample
+            // so we do not quit before the user actually moved.
             firstMousePoint = point;
             return;
         }
@@ -113,6 +121,7 @@ public final class StarfieldFrame extends JFrame {
     }
 
     private static Cursor invisibleCursor() {
+        // A 1×1 empty image is how AWT hides the pointer; there is no setVisible(false) on Cursor.
         BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         return Toolkit.getDefaultToolkit().createCustomCursor(image, new Point(0, 0), "hidden");
     }
