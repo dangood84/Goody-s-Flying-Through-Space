@@ -43,6 +43,7 @@ Or with Make:
 make config        # settings dialog
 make screensaver   # full-screen saver
 make window        # starfield in a normal window
+make jar           # GoodysStarfield.jar (double-click / java -jar)
 make clean         # remove compiled classes
 ```
 
@@ -63,6 +64,34 @@ java -cp out com.goody.screensaver.StarfieldSaver --config
 | `/p`, `--preview` | No-op (Windows-style preview hook); exits without a window |
 
 Settings from the dialog are persisted, so `--fullscreen` and `--window` use the last saved look.
+
+## Double-clickable JAR
+
+`make jar` compiles the classes, then packs them with a `Main-Class` manifest entry (`com.goody.screensaver.StarfieldSaver`):
+
+```bash
+make jar
+java -jar GoodysStarfield.jar
+```
+
+That is the same as `jar cfe GoodysStarfield.jar com.goody.screensaver.StarfieldSaver -C out .` after a compile. Double-clicking the file (or `java -jar` with no extra flags) opens the **settings dialog**, because that is the default when argv is empty.
+
+Pass flags after the jar name:
+
+```bash
+java -jar GoodysStarfield.jar --window
+java -jar GoodysStarfield.jar --fullscreen
+```
+
+Finder on macOS will only launch a `.jar` on double-click if a JRE is installed **and** `.jar` is associated with Jar Launcher / Java. Homebrew OpenJDK is often on `PATH` for the terminal but not wired to Finder. If double-click does nothing, use `java -jar` or make a small `GoodysStarfield.command` next to the jar:
+
+```bash
+#!/bin/sh
+cd "$(dirname "$0")"
+exec java -jar GoodysStarfield.jar --window
+```
+
+Then `chmod +x GoodysStarfield.command` and double-click that instead. Java 21 still has to be on the `PATH` that Finder apps see (a login-shell `PATH` from `.zshrc` is not always enough).
 
 ## Using it
 
