@@ -2,7 +2,7 @@ SRC := $(wildcard src/main/java/com/goody/screensaver/*.java)
 OUT := out
 MAIN := com.goody.screensaver.StarfieldSaver
 
-.PHONY: compile run config screensaver clean
+.PHONY: compile run config screensaver window clean
 
 compile:
 	mkdir -p $(OUT)
@@ -15,6 +15,9 @@ config: compile
 
 screensaver: compile
 	java -cp $(OUT) $(MAIN) --fullscreen
+
+window: compile
+	java -cp $(OUT) $(MAIN) --window
 
 clean:
 	rm -rf $(OUT)

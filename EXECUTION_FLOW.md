@@ -2,7 +2,7 @@
 
 A step-by-step trace of what happens from `public static void main(String[] args)` through screen initialisation and timer startup, down to how individual frames are calculated and drawn.
 
-Default launch (`./run.sh`) opens settings; `--fullscreen` skips the dialog. The starfield itself is the same either way: a `StarfieldPanel` gets a peer, a timer starts, then update and draw alternate on the EDT.
+Default launch (`./run.sh`) opens settings; `--fullscreen` or `--window` skips the dialog. The starfield itself is the same in every case: a `StarfieldPanel` gets a peer, a timer starts, then update and draw alternate on the EDT.
 
 Two threads matter after startup:
 
@@ -14,7 +14,7 @@ Two threads matter after startup:
 ## Phase A — `main` (not the EDT yet)
 
 1. JVM calls `StarfieldSaver.main(String[] args)` (`FlyingThroughSpace.main` only forwards here).
-2. `LaunchMode.fromArgs` strips `/`, `-`, `--` and maps `s`/`fullscreen`, `c`/`config`, `p`/`preview`. Last match wins. No args → `CONFIG`.
+2. `LaunchMode.fromArgs` strips `/`, `-`, `--` and maps `s`/`fullscreen`, `w`/`window`, `c`/`config`, `p`/`preview`. Last match wins. No args → `CONFIG`.
 3. If mode is `PREVIEW`, `main` returns. Process ends. No window.
 4. Otherwise `SwingUtilities.invokeLater(...)` queues a Runnable on the EDT. Swing is not thread-safe, so nothing below is created on `main`.
 5. `main` returns. The JVM stays up because AWT has started a **non-daemon** toolkit thread.
@@ -29,10 +29,11 @@ public static void main(String[] args) {
     SwingUtilities.invokeLater(() -> {
         installLookAndFeel();
         ScreensaverConfig config = ScreensaverConfig.load();
-        switch (mode) {
-            case FULLSCREEN -> new StarfieldFrame(config, () -> System.exit(0)).showFullScreen();
-            case CONFIG, PREVIEW -> new SettingsDialog(config).setVisible(true);
-        }
+            switch (mode) {
+                case FULLSCREEN -> new StarfieldFrame(config, () -> System.exit(0)).showFullScreen();
+                case WINDOWED -> new StarfieldFrame(config, () -> System.exit(0), true).showWindowed();
+                case CONFIG, PREVIEW -> new SettingsDialog(config).setVisible(true);
+            }
     });
 }
 ```
@@ -46,18 +47,24 @@ public static void main(String[] args) {
 8. `ScreensaverConfig.load()` builds a fresh config, overlays `Preferences` keys (`starCount`, `warpSpeed`, colours as packed ARGB), then `setStarCount` / `setWarpSpeed` / `setMaxStarSize` clamp ranges.
 9. Switch:
    - `FULLSCREEN` → `new StarfieldFrame(config, () -> System.exit(0)).showFullScreen()`
+   - `WINDOWED` → `new StarfieldFrame(config, () -> System.exit(0), true).showWindowed()`
    - `CONFIG` → `new SettingsDialog(config).setVisible(true)`  
-     That dialog also embeds a `StarfieldPanel`. From step 12 onward the **preview** follows the same panel path; the rest of this trace is **full screen** (`/s` or **Start screensaver**).
+     That dialog also embeds a `StarfieldPanel`. From step 12 onward the **preview** follows the same panel path. The rest of this trace is **full screen** (`/s` or **Start screensaver**), with windowed differences called out.
 
-**Start screensaver** from the dialog: `config.save()`, `launchingScreensaver = true` (so `windowClosed` does not `System.exit`), dispose the dialog, then `new StarfieldFrame(config.copy(), ...).showFullScreen()`. `copy()` snapshots so the saver is not sharing a live object.
+**Start screensaver** / **Start in window** from the dialog: `config.save()`, `launchingScreensaver = true` (so `windowClosed` does not `System.exit`), dispose the dialog, then `new StarfieldFrame(config.copy(), ..., windowed)`. `copy()` snapshots so the saver is not sharing a live object.
 
 ```java
-private void launchScreensaver() {
+private void launchScreensaver(boolean windowed) {
     config.save();
     launchingScreensaver = true;
     setVisible(false);
     dispose();
-    new StarfieldFrame(config.copy(), () -> System.exit(0)).showFullScreen();
+    var frame = new StarfieldFrame(config.copy(), () -> System.exit(0), windowed);
+    if (windowed) {
+        frame.showWindowed();
+    } else {
+        frame.showFullScreen();
+    }
 }
 ```
 
@@ -65,24 +72,31 @@ private void launchScreensaver() {
 
 ## Phase C — screen initialisation (`StarfieldFrame`)
 
-10. `StarfieldFrame` constructor:
-    - undecorated, not resizable, always on top, `DO_NOTHING_ON_CLOSE`
-    - invisible 1×1 ARGB cursor
+10. `StarfieldFrame` constructor (`windowed` is false for full screen):
+    - **Full screen:** undecorated, not resizable, always on top, invisible 1×1 ARGB cursor
+    - **Windowed:** decorated, resizable, visible cursor, `windowClosing` → `exitScreensaver()`
     - `new StarfieldPanel(config)` (timer is **created**, not started)
     - `setContentPane(panel)`
-    - key + mouse-motion listeners on **both** frame and panel
+    - key listeners on **both** frame and panel; mouse-motion listeners **only** in full screen
 
 ```java
-public StarfieldFrame(ScreensaverConfig config, Runnable onExit) {
+public StarfieldFrame(ScreensaverConfig config, Runnable onExit, boolean windowed) {
     super("Goody's Flying Through Space");
     this.onExit = onExit;
+    this.windowed = windowed;
     this.device = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
 
-    setUndecorated(true);
-    setResizable(false);
-    setAlwaysOnTop(true);
-    setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
-    setCursor(invisibleCursor());
+    if (windowed) {
+        setResizable(true);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        setMinimumSize(new Dimension(400, 300));
+    } else {
+        setUndecorated(true);
+        setResizable(false);
+        setAlwaysOnTop(true);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        setCursor(invisibleCursor());
+    }
     setFocusable(true);
 
     StarfieldPanel panel = new StarfieldPanel(config);
@@ -128,6 +142,8 @@ public void showFullScreen() {
     getContentPane().requestFocusInWindow();
 }
 ```
+
+Windowed instead calls `showWindowed()`: size 960×600, `setLocationRelativeTo(null)`, `setVisible(true)`, then the same focus calls. No exclusive display mode.
 
 13. Showing the frame **realizes** the component tree. AWT creates native peers. That calls `StarfieldPanel.addNotify()`.
 14. `addNotify()` → `super.addNotify()` then `start()`:
@@ -339,8 +355,9 @@ That pair (28 then 29) repeats until input.
 
 ## Phase H — shutdown
 
-30. Key, or mouse move ≥ 12 px from the **first** sample (the first sample is ignored — exclusive mode often fakes a motion event).
-31. `exitScreensaver()` once (`exited` guard): `panel.stop()` (timer off, `lastNanos = 0`), `setFullScreenWindow(null)` to give the desktop back, `dispose()`, `System.exit(0)`.
+30. **Full screen:** any key, or mouse move ≥ 12 px from the **first** sample (the first sample is ignored — exclusive mode often fakes a motion event).  
+    **Windowed:** window close box or Escape only; mouse motion does not quit.
+31. `exitScreensaver()` once (`exited` guard): `panel.stop()` (timer off, `lastNanos = 0`), `setFullScreenWindow(null)` if this frame owned exclusive mode, `dispose()`, `System.exit(0)`.
 32. Disposing the frame calls `removeNotify()` → `stop()` again (idempotent).
 
 ```java
@@ -371,7 +388,7 @@ public void removeNotify() {
 
 ## One-line map
 
-`main` → `invokeLater` → load config → `StarfieldFrame.showFullScreen` → `addNotify` → `timer.start` → **`onFrame` decreases `z`** → **`repaint`** → **`paintComponent` divides by `z` and draws squares**.
+`main` → `invokeLater` → load config → `StarfieldFrame.showFullScreen` or `showWindowed` → `addNotify` → `timer.start` → **`onFrame` decreases `z`** → **`repaint`** → **`paintComponent` divides by `z` and draws squares**.
 
 Debugger: `StarfieldSaver.main`, `StarfieldPanel.addNotify`, `onFrame`, `paintComponent`. First `onFrame` only stamps time; motion starts on the second tick.
 

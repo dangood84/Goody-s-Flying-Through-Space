@@ -9,6 +9,7 @@ import javax.swing.UIManager;
  * to a window on the Swing Event Dispatch Thread (EDT).
  *
  * <p>{@code /s} or {@code --fullscreen} starts the saver immediately.
+ * {@code /w} or {@code --window} opens a normal resizable window (standalone only).
  * {@code /c} or {@code --config} opens the preferences dialog.
  * With no arguments, the settings dialog is shown.
  */
@@ -33,6 +34,7 @@ public final class StarfieldSaver {
             ScreensaverConfig config = ScreensaverConfig.load();
             switch (mode) {
                 case FULLSCREEN -> new StarfieldFrame(config, () -> System.exit(0)).showFullScreen();
+                case WINDOWED -> new StarfieldFrame(config, () -> System.exit(0), true).showWindowed();
                 case CONFIG, PREVIEW -> new SettingsDialog(config).setVisible(true);
             }
         });
@@ -51,11 +53,13 @@ public final class StarfieldSaver {
     /**
      * Last matching flag wins, so {@code app /c /s} runs full screen. Prefixes
      * {@code /}, {@code -}, and {@code --} are stripped so Windows .scr flags
-     * and Unix-style flags share one parser.
+     * and Unix-style flags share one parser. {@code /w} is exact so it does not
+     * collide with other letters the way {@code /c} matches {@code /c:HWND}.
      */
     enum LaunchMode {
         CONFIG,
         FULLSCREEN,
+        WINDOWED,
         PREVIEW;
 
         static LaunchMode fromArgs(String[] args) {
@@ -67,6 +71,8 @@ public final class StarfieldSaver {
                 String arg = stripPrefix(raw);
                 if (arg.equalsIgnoreCase("s") || arg.equalsIgnoreCase("fullscreen")) {
                     mode = FULLSCREEN;
+                } else if (arg.equalsIgnoreCase("w") || arg.equalsIgnoreCase("window")) {
+                    mode = WINDOWED;
                 } else if (startsWithIgnoreCase(arg, "c") || arg.equalsIgnoreCase("config")) {
                     // startsWith "c" also matches Windows /c:HWND (parent handle after the colon).
                     mode = CONFIG;

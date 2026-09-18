@@ -1,6 +1,7 @@
 package com.goody.screensaver;
 
 import java.awt.Cursor;
+import java.awt.Dimension;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
@@ -9,40 +10,65 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import javax.swing.JFrame;
 
 /**
- * Full-screen window shell. Owns exclusive display mode and wake-on-input;
- * the starfield itself is delegated to {@link StarfieldPanel}.
+ * Window shell around {@link StarfieldPanel}. Full-screen mode owns exclusive
+ * display and wake-on-input (classic screensaver). Windowed mode is a normal
+ * decorated, resizable frame — standalone Java app only, not the OS ports.
  */
 public final class StarfieldFrame extends JFrame {
 
     private static final int MOUSE_MOVE_EXIT_PIXELS = 12;
+    private static final int WINDOWED_WIDTH = 960;
+    private static final int WINDOWED_HEIGHT = 600;
 
     private final GraphicsDevice device;
     private final Runnable onExit;
+    private final boolean windowed;
     /** Guard so key + motion cannot run teardown twice (second pass would NPE or re-exit). */
     private boolean exited;
     private Point firstMousePoint;
 
     public StarfieldFrame(ScreensaverConfig config, Runnable onExit) {
+        this(config, onExit, false);
+    }
+
+    public StarfieldFrame(ScreensaverConfig config, Runnable onExit, boolean windowed) {
         super("Goody's Flying Through Space");
         this.onExit = onExit;
+        this.windowed = windowed;
         this.device = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
 
-        // Undecorated + exclusive full screen hides the title bar and typically the menu bar/dock.
-        setUndecorated(true);
-        setResizable(false);
-        setAlwaysOnTop(true);
-        // We handle dismiss ourselves; the OS close button is gone anyway.
-        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
-        setCursor(invisibleCursor());
+        if (windowed) {
+            setResizable(true);
+            setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+            setMinimumSize(new Dimension(400, 300));
+        } else {
+            // Undecorated + exclusive full screen hides the title bar and typically the menu bar/dock.
+            setUndecorated(true);
+            setResizable(false);
+            setAlwaysOnTop(true);
+            // We handle dismiss ourselves; the OS close button is gone anyway.
+            setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+            setCursor(invisibleCursor());
+        }
         setFocusable(true);
 
         StarfieldPanel panel = new StarfieldPanel(config);
         setContentPane(panel);
         bindWakeListeners(panel);
+        if (windowed) {
+            addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent event) {
+                    exitScreensaver();
+                }
+            });
+        }
     }
 
     public void showFullScreen() {
@@ -59,21 +85,38 @@ public final class StarfieldFrame extends JFrame {
         getContentPane().requestFocusInWindow();
     }
 
+    /**
+     * Ordinary decorated window. Projection in {@link StarfieldPanel} uses the
+     * panel size, so resizing the frame recentres the vanishing point.
+     */
+    public void showWindowed() {
+        setSize(WINDOWED_WIDTH, WINDOWED_HEIGHT);
+        setLocationRelativeTo(null);
+        setVisible(true);
+        toFront();
+        requestFocus();
+        getContentPane().requestFocusInWindow();
+    }
+
     private void bindWakeListeners(StarfieldPanel panel) {
         KeyAdapter keys = new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent event) {
-                exitScreensaver();
+                onKey(event);
             }
 
             @Override
             public void keyTyped(KeyEvent event) {
-                exitScreensaver();
+                onKey(event);
             }
         };
         // Listen on both frame and panel: depending on OS/focus, key events may hit either.
         addKeyListener(keys);
         panel.addKeyListener(keys);
+
+        if (windowed) {
+            return;
+        }
 
         MouseMotionAdapter mouse = new MouseMotionAdapter() {
             @Override
@@ -88,6 +131,17 @@ public final class StarfieldFrame extends JFrame {
         };
         addMouseMotionListener(mouse);
         panel.addMouseMotionListener(mouse);
+    }
+
+    private void onKey(KeyEvent event) {
+        if (windowed) {
+            // Title-bar close is the usual exit; Escape matches typical windowed-app habit.
+            if (event.getKeyCode() == KeyEvent.VK_ESCAPE || event.getKeyChar() == KeyEvent.VK_ESCAPE) {
+                exitScreensaver();
+            }
+            return;
+        }
+        exitScreensaver();
     }
 
     private void onMouseMoved(Point point) {

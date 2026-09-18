@@ -69,7 +69,7 @@ public final class SettingsDialog extends JDialog {
         var header = new JPanel(new BorderLayout());
         var title = new JLabel("Preferences & Settings");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 20f));
-        var subtitle = new JLabel("Saved automatically  •  /c config  •  /s fullscreen  •  Java 21");
+        var subtitle = new JLabel("Saved automatically  •  /c config  •  /s fullscreen  •  /w window  •  Java 21");
         subtitle.setForeground(new Color(90, 90, 90));
         header.add(title, BorderLayout.NORTH);
         header.add(subtitle, BorderLayout.SOUTH);
@@ -135,26 +135,34 @@ public final class SettingsDialog extends JDialog {
 
         var buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         var close = new JButton("Close");
+        var startWindow = new JButton("Start in window");
         var start = new JButton("Start screensaver");
-        start.addActionListener(event -> launchScreensaver());
+        start.addActionListener(event -> launchScreensaver(false));
+        startWindow.addActionListener(event -> launchScreensaver(true));
         close.addActionListener(event -> dispose());
         getRootPane().setDefaultButton(start);
         buttons.add(close);
+        buttons.add(startWindow);
         buttons.add(start);
         south.add(buttons, BorderLayout.SOUTH);
 
-        var hint = new JLabel("Any key or a significant mouse move exits the full-screen saver.");
+        var hint = new JLabel("Full screen: any key or a significant mouse move exits. Window: close box or Escape.");
         hint.setForeground(new Color(90, 90, 90));
         south.add(hint, BorderLayout.NORTH);
         return south;
     }
 
-    private void launchScreensaver() {
+    private void launchScreensaver(boolean windowed) {
         config.save();
         launchingScreensaver = true;
         setVisible(false);
         dispose();
-        new StarfieldFrame(config.copy(), () -> System.exit(0)).showFullScreen();
+        var frame = new StarfieldFrame(config.copy(), () -> System.exit(0), windowed);
+        if (windowed) {
+            frame.showWindowed();
+        } else {
+            frame.showFullScreen();
+        }
     }
 
     /** Mutate the in-memory model, then flush Preferences so a crash still keeps the last edit. */

@@ -14,7 +14,7 @@ main()
   → queue work on the Swing Event Dispatch Thread (EDT)
       → load ScreensaverConfig (state)
       → either SettingsDialog (settings UI)
-         or StarfieldFrame (full-screen window)
+         or StarfieldFrame (full-screen *or* windowed shell)
               → StarfieldPanel (timer + paint)
 ```
 
@@ -23,7 +23,7 @@ main()
 | Entry / routing | `StarfieldSaver` | Test runner that picks “config” vs “run” from CLI |
 | State | `ScreensaverConfig` | Test data / fixture that is saved and reloaded |
 | Settings UI | `SettingsDialog` | Form that writes into the fixture |
-| Window shell | `StarfieldFrame` | Full-screen host + “abort on input” |
+| Window shell | `StarfieldFrame` | Full-screen host + “abort on input”, or a normal resizable window |
 | Animation view | `StarfieldPanel` | The thing that actually moves and draws stars |
 
 Swing is **event-driven**. Almost everything after `main` runs on one thread: the **Event Dispatch Thread (EDT)**. Clicks, timer ticks, and `paintComponent` all happen there. That is why the animation uses `javax.swing.Timer` instead of a raw `while (true)` loop on a background thread.
@@ -45,6 +45,7 @@ The real entry point is `StarfieldSaver.main(String[] args)`.
 1. **JVM starts** and calls `main`.
 2. **`LaunchMode.fromArgs(args)`** maps Windows-style and GNU-style flags:
    - `/s` or `--fullscreen` → full-screen saver
+   - `/w` or `--window` → decorated, resizable window (standalone Java app only; not the OS ports)
    - `/c` or `--config` (also the default with no args) → settings dialog
    - `/p` or `--preview` → exit immediately (Settings preview pane; this Java UI does not embed into a native HWND)
 3. If the mode is `PREVIEW`, `main` returns. The process ends. No window.
@@ -55,10 +56,11 @@ The real entry point is `StarfieldSaver.main(String[] args)`.
    - **`ScreensaverConfig.load()`** reads last-saved preferences (or defaults)
    - `switch` on mode:
      - `FULLSCREEN` → `new StarfieldFrame(config, () -> System.exit(0)).showFullScreen()`
+     - `WINDOWED` → `new StarfieldFrame(config, () -> System.exit(0), true).showWindowed()`
      - `CONFIG` → `new SettingsDialog(config).setVisible(true)`
 6. After the window is showing, the process stays alive because Swing keeps a **non-daemon AWT thread** running until `System.exit(0)` or the last window is disposed (settings close also calls `System.exit(0)`).
 
-### Two user journeys
+### Three user journeys
 
 **Settings first** (`./run.sh` or `--config`):
 
@@ -69,6 +71,8 @@ EDT creates SettingsDialog
   → Close → windowClosed → save → System.exit(0)
   → Start screensaver → save, hide/dispose dialog, StarfieldFrame full screen
        → any key or ~12px mouse move → stop timer, leave exclusive full screen, System.exit(0)
+  → Start in window → same save/dispose, then StarfieldFrame windowed (960×600, resizable)
+       → close box or Escape → stop timer, dispose, System.exit(0)
 ```
 
 **Saver first** (`--fullscreen` / `/s`):
@@ -80,12 +84,22 @@ EDT creates StarfieldFrame immediately
   → input → System.exit(0)
 ```
 
+**Window first** (`--window` / `/w`):
+
+```
+EDT creates StarfieldFrame(windowed=true)
+  → decorated, resizable JFrame (visible cursor, not always-on-top)
+  → showWindowed() sizes to 960×600 and centres it
+  → StarfieldPanel timer starts on addNotify (same as full screen)
+  → close / Escape → System.exit(0)
+```
+
 ### Why testers care
 
-- **CLI is the feature flag.** Automating “open settings” vs “open saver” is `java ... StarfieldSaver --config` vs `--fullscreen`.
+- **CLI is the feature flag.** Automating “open settings” vs “open saver” vs “open window” is `java ... StarfieldSaver --config` vs `--fullscreen` vs `--window`.
 - **Preferences survive process restarts.** A test that changes warp speed and relaunches should see the same speed. Storage is `java.util.prefs.Preferences` (OS user prefs, not a file in the repo).
-- **Exit is process-level** on the full-screen path (`System.exit(0)`), not “navigate back to a page.”
-- **The settings preview is the real renderer.** If stars move in the dialog, the same class will move them full screen. You are not testing a fake stub.
+- **Exit is process-level** on the full-screen and windowed paths (`System.exit(0)`), not “navigate back to a page.”
+- **The settings preview is the real renderer.** If stars move in the dialog, the same class will move them full screen or in a window. You are not testing a fake stub.
 
 ---
 
@@ -111,7 +125,7 @@ Holds the starfield *look and warp*, not the current star positions:
 
 **Load / save:** `Preferences.userNodeForPackage(ScreensaverConfig.class)`. Keys are string names like `"starCount"` and `"warpSpeed"`. Colours are stored as `Color.getRGB()` ints.
 
-**Copy:** `copy()` snapshots state when launching full screen so the saver is not coupled to the dialog’s later edits (the dialog is disposed anyway).
+**Copy:** `copy()` snapshots state when launching full screen or the windowed frame so the saver is not coupled to the dialog’s later edits (the dialog is disposed anyway).
 
 **Clamping:** setters use `Math.clamp` so sliders cannot push illegal counts/speeds/sizes.
 
@@ -122,18 +136,21 @@ This class is the closest thing to a **model**. It has no Swing widgets and no p
 - A `JDialog` with form controls (sliders, checkbox, `JColorChooser`)
 - Writes into the **same** `ScreensaverConfig` instance it was given
 - `persist(Runnable)` = mutate config + `config.save()` on each change
-- Hosts a small `StarfieldPanel` as a **live preview** (same class as full screen)
+- Hosts a small `StarfieldPanel` as a **live preview** (same class as full screen / windowed)
+- **Start screensaver** vs **Start in window** both dispose the dialog (`launchingScreensaver` so close does not `System.exit`) then construct a `StarfieldFrame`
 - Does not compute star positions; it only changes config fields the panel reads while ticking and painting
 
 If the tester moves the “Number of stars” slider, `StarfieldPanel.ensureStars()` notices `stars.length != config.getStarCount()` and rebuilds the array on the next tick/paint. That is why density changes live.
 
 ### `StarfieldFrame` — window chrome and wake-on-input
 
-- Undecorated `JFrame`, hidden cursor, always on top
-- Puts a `StarfieldPanel` in `setContentPane`
-- `showFullScreen()` uses `GraphicsDevice.setFullScreenWindow` when supported, otherwise maximized
-- **Does not paint the stars.** It listens for keys and mouse motion and then shuts down
-- Mouse “wake”: first motion is recorded; later motion of 12 pixels or more exits (so the initial cursor warp does not instantly quit)
+One class, two shells, chosen by a `windowed` flag (must be set *before* the frame is shown; `setUndecorated` cannot change after realize):
+
+- **Full screen:** undecorated `JFrame`, hidden cursor, always on top. Any key or ~12 px mouse move exits. `showFullScreen()` uses `GraphicsDevice.setFullScreenWindow` when supported, otherwise maximized.
+- **Windowed (standalone only):** decorated, resizable, visible cursor. `showWindowed()` opens at 960×600. Close box or Escape exits. Mouse motion does **not** quit — that would make the window unusable.
+- Puts a `StarfieldPanel` in `setContentPane` in both modes
+- **Does not paint the stars.** It only owns chrome and input, then shuts down
+- Mouse “wake” (full screen only): first motion is recorded; later motion of 12 pixels or more exits (so the initial cursor warp does not instantly quit)
 
 ### `StarfieldPanel` — rendering + animation loop
 
@@ -265,7 +282,7 @@ Why this looks like flying:
 - When `z` shrinks (near), `x / z` grows → the same star races toward the **edges**.
 - Divide-by-`z` is the classic pinhole / “1/z” perspective. `FOCAL = 0.18` only scales how wide the field of view feels.
 
-The same formula works in the 600×200 settings preview and in full screen because `cx`, `cy`, and `scale` are derived from the panel size.
+The same formula works in the 600×200 settings preview, a resizable window, and full screen because `cx`, `cy`, and `scale` are derived from the panel size.
 
 ### Size and brightness from depth
 
@@ -329,7 +346,7 @@ src/main/java/com/goody/screensaver/
   FlyingThroughSpace.java   # main alias
   ScreensaverConfig.java    # model + Preferences
   SettingsDialog.java       # settings view
-  StarfieldFrame.java       # full-screen shell + input
+  StarfieldFrame.java       # full-screen or windowed shell + input
   StarfieldPanel.java       # timer, z math, 1/z projection, Graphics2D
 ```
 

@@ -33,6 +33,7 @@ That compiles to `out/` and opens the settings dialog. You can also pass flags t
 ```bash
 ./run.sh --config
 ./run.sh --fullscreen
+./run.sh --window
 ./run.sh /s
 ```
 
@@ -41,6 +42,7 @@ Or with Make:
 ```bash
 make config        # settings dialog
 make screensaver   # full-screen saver
+make window        # starfield in a normal window
 make clean         # remove compiled classes
 ```
 
@@ -57,15 +59,16 @@ java -cp out com.goody.screensaver.StarfieldSaver --config
 |------|--------|
 | *(none)*, `/c`, `--config` | Open the preferences dialog |
 | `/s`, `--fullscreen` | Start the full-screen screensaver immediately |
+| `/w`, `--window` | Start in a normal resizable window (standalone Java app only) |
 | `/p`, `--preview` | No-op (Windows-style preview hook); exits without a window |
 
-Settings from the dialog are persisted, so `--fullscreen` uses the last saved look.
+Settings from the dialog are persisted, so `--fullscreen` and `--window` use the last saved look.
 
 ## Using it
 
 1. Set the number of stars, warp speed, maximum star size, warp trails, and colors.
-2. Click **Start screensaver** (or launch with `--fullscreen`).
-3. Press any key, or move the mouse more than a few pixels, to exit.
+2. Click **Start screensaver** (or launch with `--fullscreen`), or **Start in window** (`--window`).
+3. Full screen: press any key, or move the mouse more than a few pixels, to exit. Windowed: close the window or press Escape.
 
 The live preview in the dialog uses the same starfield renderer as full screen.
 
@@ -78,7 +81,7 @@ src/main/java/com/goody/screensaver/
   StarfieldSaver.java      # main, flag parsing
   FlyingThroughSpace.java  # compatibility entry point
   SettingsDialog.java      # JDialog preferences UI
-  StarfieldFrame.java      # full-screen window and wake-on-input
+  StarfieldFrame.java      # full-screen or windowed shell + wake-on-input
   StarfieldPanel.java      # Timer + perspective starfield
   ScreensaverConfig.java   # settings + Preferences load/save
 ```
